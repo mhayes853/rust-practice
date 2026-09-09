@@ -44,24 +44,8 @@ where
     where
         K: PartialEq,
     {
-        let (prev, next) = {
-            let entry = self.table.get_mut(key)?;
-            (entry.node.prev.clone(), entry.node.next.clone())
-        };
-        if let Some(prev_key) = prev.as_ref() {
-            if let Some(prev_entry) = self.table.get_mut(prev_key) {
-                prev_entry.node.next = next.clone();
-            }
-        }
-        if let Some(next_key) = next.as_ref() {
-            if let Some(next_entry) = self.table.get_mut(next_key) {
-                next_entry.node.prev = prev.clone();
-            }
-        }
-
-        if self.list_tail.as_ref() == Some(key) {
-            self.list_tail = prev.clone();
-        }
+        let node = self.table.get_mut(key)?.node.clone();
+        self.detach_node(&node);
 
         if self.list_head.as_ref() != Some(key) {
             let old_head = self.list_head.clone();
@@ -98,20 +82,7 @@ where
         };
 
         if let Some(prev_node) = prev_entry.as_ref().map(|e| e.1.clone()).as_ref() {
-            if let Some(prev_key) = prev_node.prev.as_ref() {
-                if let Some(before_entry) = self.table.get_mut(prev_key) {
-                    before_entry.node.next = prev_node.next.clone();
-
-                    if self.list_tail == prev_node.key {
-                        self.list_tail = before_entry.node.key.clone();
-                    }
-                }
-            }
-            if let Some(next_key) = prev_node.next.as_ref() {
-                if let Some(next_entry) = self.table.get_mut(next_key) {
-                    next_entry.node.prev = prev_node.prev.clone();
-                }
-            }
+            self.detach_node(prev_node);
         }
 
         let node = LruCacheNode::<K> {
@@ -132,13 +103,30 @@ where
         self.table.insert(key, LruCacheEntry { node, value });
 
         if self.is_above_capacity() {
-            self.evict();
+            self.evict_least_recently_used();
         }
 
         prev_entry.map(|e| e.0)
     }
 
-    fn evict(&mut self) {
+    fn detach_node(&mut self, node: &LruCacheNode<K>) {
+        if let Some(prev_key) = node.prev.as_ref() {
+            if let Some(before_entry) = self.table.get_mut(prev_key) {
+                before_entry.node.next = node.next.clone();
+
+                if self.list_tail == node.key {
+                    self.list_tail = before_entry.node.key.clone();
+                }
+            }
+        }
+        if let Some(next_key) = node.next.as_ref() {
+            if let Some(next_entry) = self.table.get_mut(next_key) {
+                next_entry.node.prev = node.prev.clone();
+            }
+        }
+    }
+
+    fn evict_least_recently_used(&mut self) {
         if let Some(before_tail_entry) = self
             .list_tail
             .as_ref()
